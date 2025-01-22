@@ -51,4 +51,35 @@ function sendOrderToDriver(driverId, pdfFilePath, bot) {
     });
 }
 
+
+const { saveDriverToDatabase, checkDriverInDatabase } = require('./database');
+
+async function startRegistration(chatId, bot) {
+    const managerChatId = process.env.MANAGER_CHAT_ID;
+
+    // Проверяем, существует ли водитель в базе данных
+    const driverExists = await checkDriverInDatabase(chatId);
+
+    if (driverExists) {
+        bot.sendMessage(chatId, 'Вы уже зарегистрированы и ожидаете заказ.');
+        return;
+    }
+
+    // Сохраняем нового водителя в базе
+    const driver = {
+        chatId: chatId,
+        name: 'Имя водителя', // Можно запросить имя пользователя
+        registeredAt: new Date(),
+    };
+
+    await saveDriverToDatabase(driver);
+
+    // Уведомляем водителя
+    bot.sendMessage(chatId, 'Вы успешно зарегистрированы! Ожидайте заказ от менеджера.');
+
+    // Уведомляем менеджера
+    bot.sendMessage(managerChatId, `Новый водитель зарегистрировался!\nИмя: ${driver.name}\nID чата: ${chatId}`);
+}
+
+
 module.exports = { startRegistration, sendOrderToDriver };
