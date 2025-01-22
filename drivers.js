@@ -1,85 +1,111 @@
-const fs = require('fs');
-const path = require('path');
+require("dotenv").config();
+const TelegramBot = require("node-telegram-bot-api");
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-// Путь к базе данных водителей
-const driversFile = path.join(__dirname, 'drivers.json');
+// ID менеджера, задайте вручную или через .env
+const managerChatId = process.env.MANAGER_CHAT_ID;
 
-// Функция для чтения базы данных водителей
-function getDrivers() {
-    try {
-        const data = fs.readFileSync(driversFile);
-        return JSON.parse(data);
-    } catch (err) {
-        console.error("Ошибка при чтении файла водителей:", err);
-        return [];
-    }
+// Функция: отправить меню водителю
+function sendDriverMenu(chatId, bot) {
+  bot.sendMessage(chatId, "Выберите действие:", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "Выслать фото", callback_data: "send_photo" }],
+        [{ text: "Выслать файл PDF", callback_data: "send_pdf" }],
+        [{ text: "Написать менеджеру", callback_data: "contact_manager" }],
+        [{ text: "Вы заправлялись", callback_data: "refuel" }],
+        [{ text: "Мойка авто", callback_data: "car_wash" }],
+      ],
+    },
+  });
 }
 
-// Функция для добавления водителя в базу данных
-function saveDriver(driver) {
-    const drivers = getDrivers();
-    drivers.push(driver);
-    fs.writeFileSync(driversFile, JSON.stringify(drivers, null, 2));
-}
+// Команда /start
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
 
-// Обработчик регистрации водителя
-function startRegistration(chatId, bot) {
-    // Проверка, зарегистрирован ли уже водитель
-    const drivers = getDrivers();
-    const isRegistered = drivers.some(driver => driver.chatId === chatId);
+  // Если это менеджер, покажем сообщение, что он зарегистрирован
+  if (chatId.toString() === managerChatId) {
+    bot.sendMessage(chatId, "Вы зарегистрированы как менеджер.");
+  } else {
+    // Показываем меню водителя
+    sendDriverMenu(chatId, bot);
+  }
+});
 
-    if (isRegistered) {
-        bot.sendMessage(chatId, 'Вы уже зарегистрированы.');
-        return;
-    }
+// Обработка callback-запросов от водителя
+bot.on("callback_query", (callbackQuery) => {
+  const chatId = callbackQuery.message.chat.id;
+  const data = callbackQuery.data;
 
-    // Добавление водителя в базу данных
-    const newDriver = { chatId, name: `Водитель #${chatId}` }; // Исправлено: добавлены обратные кавычки
-    saveDriver(newDriver);
+  switch (data) {
+    case "send_photo":
+      // Водитель отправляет фото
+      bot.sendMessage(chatId, "Пожалуйста, отправьте фото.");
+      bot.once("photo", (msg) => {
+        const fileId = msg.photo[msg.photo.length - 1].file_id;
+        bot.sendPhoto(managerChatId, fileId, {
+          caption: `Водитель (ID: ${chatId}) отправил фото.`,
+        });
+        bot.sendMessage(chatId, "Фото отправлено менеджеру.");
+      });
+      break;
 
-    bot.sendMessage(chatId, 'Вы успешно зарегистрированы! Теперь ждите заказ.');
-}
-
-// Отправка заказа водителю
-function sendOrderToDriver(driverId, pdfFilePath, bot) {
-    bot.sendMessage(driverId, 'У вас новый заказ! Пожалуйста, заполните форму и отправьте нам обратно.', {
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: 'Отправить файл', callback_data: `send_file_${driverId}_${pdfFilePath}` }] // Исправлено: добавлены обратные кавычки
-            ]
+    case "send_pdf":
+      // Водитель отправляет PDF
+      bot.sendMessage(chatId, "Пожалуйста, отправьте файл PDF.");
+      bot.once("document", (msg) => {
+        if (msg.document.mime_type === "application/pdf") {
+          const fileId = msg.document.file_id;
+          bot.sendDocument(managerChatId, fileId, {
+            caption: `PDF файл от водителя (ID: ${chatId}).`,
+          });
+          bot.sendMessage(chatId, "PDF отправлен менеджеру.");
+        } else {
+          bot.sendMessage(chatId, "Отправьте корректный PDF файл.");
         }
-    });
-}
+      });
+      break;
 
+    case "contact_manager":
+      // Водитель пишет менеджеру
+      bot.sendMessage(chatId, "Напишите сообщение для менеджера.");
+      bot.once("message", (msg) => {
+        if (msg.text) {
+          bot.sendMessage(
+            managerChatId,
+            `Сообщение от водителя (ID: ${chatId}): ${msg.text}`
+          );
+          bot.sendMessage(chatId, "Ваше сообщение отправлено менеджеру.");
+        }
+      });
+      break;
 
-const { saveDriverToDatabase, checkDriverInDatabase } = require('./database');
+    case "refuel":
+      // Водитель отправляет фото заправки авто
+      bot.sendMessage(chatId, "Пожалуйста, отправьте фото заправки авто.");
+      bot.once("photo", (msg) => {
+        const fileId = msg.photo[msg.photo.length - 1].file_id;
+        bot.sendPhoto(managerChatId, fileId, {
+          caption: `Водитель (ID: ${chatId}) отправил фото заправки.`,
+        });
+        bot.sendMessage(chatId, "Фото отправлено менеджеру.");
+      });
+      break;
 
-async function startRegistration(chatId, bot) {
-    const managerChatId = process.env.MANAGER_CHAT_ID;
+    case "car_wash":
+      // Водитель отправляет фото после мойки авто
+      bot.sendMessage(chatId, "Пожалуйста, отправьте фото после мойки авто.");
+      bot.once("photo", (msg) => {
+        const fileId = msg.photo[msg.photo.length - 1].file_id;
+        bot.sendPhoto(managerChatId, fileId, {
+          caption: `Водитель (ID: ${chatId}) отправил фото после мойки.`,
+        });
+        bot.sendMessage(chatId, "Фото отправлено менеджеру.");
+      });
+      break;
 
-    // Проверяем, существует ли водитель в базе данных
-    const driverExists = await checkDriverInDatabase(chatId);
-
-    if (driverExists) {
-        bot.sendMessage(chatId, 'Вы уже зарегистрированы и ожидаете заказ.');
-        return;
-    }
-
-    // Сохраняем нового водителя в базе
-    const driver = {
-        chatId: chatId,
-        name: 'Имя водителя', // Можно запросить имя пользователя
-        registeredAt: new Date(),
-    };
-
-    await saveDriverToDatabase(driver);
-
-    // Уведомляем водителя
-    bot.sendMessage(chatId, 'Вы успешно зарегистрированы! Ожидайте заказ от менеджера.');
-
-    // Уведомляем менеджера
-    bot.sendMessage(managerChatId, `Новый водитель зарегистрировался!\nИмя: ${driver.name}\nID чата: ${chatId}`);
-}
-
-
-module.exports = { startRegistration, sendOrderToDriver };
+    default:
+      bot.sendMessage(chatId, "Неизвестная команда. Попробуйте еще раз.");
+  }
+});
